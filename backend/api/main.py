@@ -6,6 +6,8 @@ from db.models import Base
 from db.session import engine
 from api.routes.patients import router as patients_router
 from api.routes.doctors  import router as doctors_router
+from fastapi.staticfiles import StaticFiles
+import os
 
 Base.metadata.create_all(bind=engine)
 
@@ -27,6 +29,11 @@ app.add_middleware(
 app.include_router(patients_router, prefix="/api/v1")
 app.include_router(doctors_router,  prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
+os.makedirs("static/prescriptions", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+os.makedirs("static/prescriptions", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/", tags=["Health"])

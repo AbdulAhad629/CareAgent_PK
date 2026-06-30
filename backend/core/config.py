@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "dev-secret"
     FRONTEND_URL: str = "http://localhost:3000"
     CHROMA_DB_PATH: str = "./chroma_medical_kb"
+    BACKEND_PUBLIC_URL: str = "https://perfect-imagination-production-a8e8.up.railway.app"
 
     class Config:
         env_file = "../.env"

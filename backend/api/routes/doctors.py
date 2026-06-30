@@ -1,3 +1,9 @@
+import os
+from fastapi.responses import FileResponse
+from agents.prescription import generate_prescription_draft
+from utils.prescription_pdf import generate_prescription_pdf
+from utils.whatsapp import send_prescription_message
+from core.config import settings
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -103,3 +109,84 @@ async def update_visit_status(
     return {
         "message": f"Visit {visit_id} updated to '{status}'"
     }
+@router.post("/visits/{visit_id}/prescription/draft")
+async def draft_prescription(visit_id: int, doctor_notes: str = "", db: Session = Depends(get_db)):
+    """
+    AI generates a draft diagnosis + prescription + advice.
+    Doctor can review/edit this before finalising.
+    """
+    visit = db.query(Visit).filter(Visit.id == visit_id).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    draft = generate_prescription_draft(
+        symptoms=visit.symptoms_english or visit.symptoms_raw or "",
+        age=visit.patient.age if visit.patient else None,
+        gender=visit.patient.gender if visit.patient else None,
+        triage_level=visit.triage_level,
+        specialty=visit.required_specialty,
+        doctor_notes=doctor_notes,
+    )
+    return draft
+
+
+@router.post("/visits/{visit_id}/prescription/send")
+async def finalize_and_send_prescription(
+    visit_id: int,
+    diagnosis: str,
+    prescription: str,
+    advice: str = "",
+    db: Session = Depends(get_db),
+):
+    """
+    Doctor confirms the (possibly edited) prescription.
+    Saves it, generates a PDF, and sends it to the patient via WhatsApp.
+    """
+    visit = db.query(Visit).filter(Visit.id == visit_id).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    patient = visit.patient
+    doctor = visit.doctor
+
+    visit.diagnosis = diagnosis
+    visit.prescription = prescription
+    db.commit()
+
+    pdf_filename = f"prescription_{visit.token_number}.pdf"
+    pdf_path = os.path.join("static", "prescriptions", pdf_filename)
+    generate_prescription_pdf(
+        output_path=pdf_path,
+        patient_name=patient.name if patient else "Patient",
+        patient_age=patient.age if patient else None,
+        patient_gender=patient.gender if patient else None,
+        doctor_name=doctor.name if doctor else "Doctor",
+        doctor_specialty=doctor.specialty if doctor else visit.required_specialty,
+        token_number=visit.token_number,
+        diagnosis=diagnosis,
+        prescription=prescription,
+        advice=advice,
+    )
+
+    pdf_url = f"{settings.BACKEND_PUBLIC_URL}/static/prescriptions/{pdf_filename}"
+
+    send_result = send_prescription_message(
+        phone=patient.phone if patient else None,
+        patient_name=patient.name if patient else "Patient",
+        pdf_url=pdf_url,
+    )
+
+    return {
+        "message": "Prescription saved and sent",
+        "pdf_url": pdf_url,
+        "whatsapp": send_result,
+    }
+
+
+@router.get("/prescriptions/{filename}")
+async def download_prescription(filename: str):
+    """Direct download endpoint (alternative to /static mount)."""
+    path = os.path.join("static", "prescriptions", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type="application/pdf", filename=filename)
