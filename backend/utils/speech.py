@@ -6,7 +6,7 @@ Model sizes: tiny (39M) | base (74M) | small (244M)
 Default: base — good accuracy, fast enough on CPU.
 """
 import os, tempfile
-import whisper
+# import whisper
 from core.config import settings
 
 _model = None   
